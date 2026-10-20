@@ -183,6 +183,11 @@ tbody tr.clk:hover{background:var(--raise)}
 .gate-logo{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-bottom:5px}
 .gate-sub{font-size:12.5px;color:var(--tx3);line-height:1.55;margin-bottom:19px}
 .gate-msg{font-size:12.5px;line-height:1.55;padding:11px 13px;border-radius:9px;margin-bottom:14px}
+.gate-google{background:#fff;color:#1f1f1f;font-weight:600;padding:11px 14px;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:var(--rs)}
+.gate-google:hover{background:#ececec;color:#1f1f1f}
+.gate-alt{text-align:center;margin-top:12px}
+.gate-alt button{font-size:11.5px;color:var(--tx3);text-decoration:underline;text-underline-offset:2px}
+.gate-alt button:hover{color:var(--tx2)}
 .gate-foot{font-size:11px;color:var(--tx3);line-height:1.5;margin-top:15px;text-align:center}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
@@ -191,14 +196,26 @@ tbody tr.clk:hover{background:var(--raise)}
 <div id="gate">
   <div class="gate-box">
     <div class="gate-logo">Garage<span style="color:var(--acc)">Budget</span></div>
-    <div class="gate-sub">Entre ton adresse e-mail : tu recevras un lien qui te connecte en un clic. Pas de mot de passe à retenir.</div>
+    <div class="gate-sub">Connecte-toi avec le compte Google du garage. Rien à retenir, rien à saisir.</div>
     <div id="gate-msg"></div>
-    <div id="gate-form">
-      <label class="lbl">Adresse e-mail</label>
-      <input id="gate-mail" type="email" autocomplete="email" inputmode="email" placeholder="toi@exemple.fr" style="margin-bottom:11px">
-      <button class="btn btn-p btn-full" id="gate-btn" onclick="sendMagic()">Recevoir mon lien de connexion</button>
+    <button class="btn btn-full gate-google" onclick="signInGoogle()">
+      <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true" style="flex-shrink:0">
+        <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.2-.4-4.7H24v8.9h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.3z"/>
+        <path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.2l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.6-3.9-12.4-9.1H4.3v5.7C7.9 41.2 15.4 46 24 46z"/>
+        <path fill="#FBBC05" d="M11.6 28.3c-.5-1.3-.7-2.8-.7-4.3s.3-3 .7-4.3v-5.7H4.3C2.8 16.9 2 20.4 2 24s.8 7.1 2.3 10l7.3-5.7z"/>
+        <path fill="#EA4335" d="M24 10.6c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.1 30 2 24 2 15.4 2 7.9 6.8 4.3 14l7.3 5.7c1.8-5.2 6.6-9.1 12.4-9.1z"/>
+      </svg>
+      <span>Se connecter avec Google</span>
+    </button>
+    <div class="gate-alt"><button onclick="toggleMail()" id="gate-alt-b">Pas d'accès à ce compte Google ?</button></div>
+    <div id="gate-form" hidden>
+      <div class="hr"></div>
+      <label class="lbl">Recevoir un lien par e-mail</label>
+      <input id="gate-mail" type="email" autocomplete="email" inputmode="email" placeholder="toi@exemple.fr" style="margin-bottom:9px">
+      <button class="btn btn-full btn-sm" id="gate-btn" onclick="sendMagic()">Envoyer le lien</button>
+      <div style="font-size:10.5px;color:var(--tx3);margin-top:7px;line-height:1.5">Solution de secours : le service d'envoi est limité à deux e-mails par heure.</div>
     </div>
-    <div class="gate-foot">Tes données restent dans ta base Supabase. Ce lien sert uniquement à prouver que c'est bien toi.</div>
+    <div class="gate-foot">Seuls les comptes autorisés accèdent aux données du garage.</div>
   </div>
 </div>
 <div id="app" style="display:none">
@@ -253,9 +270,18 @@ const authed=()=>!!AUTH.token&&Date.now()<AUTH.exp;
 const appURL=()=>(location.origin&&location.origin!=="null")
   ?location.origin+location.pathname
   :location.href.split("#")[0].split("?")[0];
-function authSave(){try{localStorage.setItem(AK,JSON.stringify({refresh:AUTH.refresh,email:AUTH.email}));}catch{}}
+function authSave(){try{localStorage.setItem(AK,JSON.stringify(
+  {refresh:AUTH.refresh,email:AUTH.email,token:AUTH.token,exp:AUTH.exp,id:AUTH.id}));}catch{}}
 function authLoad(){try{const a=JSON.parse(localStorage.getItem(AK)||"null");
-  if(a){AUTH.refresh=a.refresh||null;AUTH.email=a.email||"";}}catch{}}
+  if(a){AUTH.refresh=a.refresh||null;AUTH.email=a.email||"";
+    AUTH.token=a.token||null;AUTH.exp=+a.exp||0;AUTH.id=a.id||"";}}catch{}}
+/* Un autre onglet a renouvelé la session : on adopte son jeton au lieu d'en
+   demander un second, ce que Supabase prendrait pour un rejeu. */
+window.addEventListener("storage",e=>{
+  if(e.key!==AK)return;
+  authLoad();
+  if(authed()&&g("gate")&&g("gate").classList.contains("on"))location.reload();
+});
 function authClear(){AUTH.token=null;AUTH.refresh=null;AUTH.exp=0;AUTH.id="";
   try{localStorage.removeItem(AK);}catch{}}
 function setSession(j){
@@ -266,15 +292,62 @@ function setSession(j){
   if(j.user){AUTH.email=j.user.email||AUTH.email;AUTH.id=j.user.id||AUTH.id;}
   authSave();return true;
 }
+const LOCK="gb_auth_lock";
+const LOCKID=Math.random().toString(36).slice(2);
+let refreshing=null;      /* renouvellement en cours dans cet onglet */
+let authDead=false;       /* le serveur a explicitement refusé la session */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* Verrou partagé entre les onglets. Supabase n'accepte qu'un seul usage du
+   jeton de renouvellement : si deux onglets le présentent chacun de leur côté,
+   le second passe pour un rejeu et toute la session est révoquée — c'était la
+   cause des déconnexions. L'API Web Locks garantit l'exclusivité ; le repli
+   horodaté sert aux navigateurs qui ne la proposent pas. */
+async function withAuthLock(fn){
+  if(navigator.locks&&navigator.locks.request){
+    try{return await navigator.locks.request("gb_auth_refresh",fn);}catch{return await fn();}
+  }
+  for(let i=0;i<25;i++){
+    let held=null;
+    try{held=JSON.parse(localStorage.getItem(LOCK)||"null");}catch{}
+    if(held&&Date.now()-held.t<9000){await sleep(400);authLoad();if(authed())return true;continue;}
+    try{
+      localStorage.setItem(LOCK,JSON.stringify({id:LOCKID,t:Date.now()}));
+      await sleep(60);
+      const back=JSON.parse(localStorage.getItem(LOCK)||"null");
+      if(!back||back.id!==LOCKID){await sleep(300);continue;}   /* un autre a gagné */
+    }catch{}
+    try{return await fn();}
+    finally{try{const b=JSON.parse(localStorage.getItem(LOCK)||"null");
+      if(b&&b.id===LOCKID)localStorage.removeItem(LOCK);}catch{}}
+  }
+  return await fn();
+}
+
 async function authRefresh(){
-  if(!AUTH.refresh)return false;
-  try{
-    const r=await fetch(SU+"/auth/v1/token?grant_type=refresh_token",{method:"POST",
-      headers:{"Content-Type":"application/json",apikey:SK},
-      body:JSON.stringify({refresh_token:AUTH.refresh})});
-    if(!r.ok){authClear();return false;}
-    return setSession(await r.json());
-  }catch{return false;}
+  if(refreshing)return refreshing;
+  refreshing=(async()=>{
+    authLoad();
+    if(authed())return true;
+    if(!AUTH.refresh)return false;
+    return withAuthLock(async()=>{
+      authLoad();                       /* un autre onglet a pu renouveler entre-temps */
+      if(authed())return true;
+      if(!AUTH.refresh)return false;
+      let r;
+      try{
+        r=await fetch(SU+"/auth/v1/token?grant_type=refresh_token",{method:"POST",
+          headers:{"Content-Type":"application/json",apikey:SK},
+          body:JSON.stringify({refresh_token:AUTH.refresh})});
+      }catch{
+        return false;                   /* réseau coupé : la session reste valable */
+      }
+      if(r.ok){authDead=false;return setSession(await r.json());}
+      if(r.status>=500||r.status===429)return false;   /* panne ou quota : on réessaiera */
+      authDead=true;authClear();return false;          /* refus explicite : session morte */
+    });
+  })();
+  try{return await refreshing;}finally{refreshing=null;}
 }
 async function authReady(){return authed()?true:await authRefresh();}
 async function fetchUser(){
@@ -290,8 +363,11 @@ async function sb(path,opt={}){
   await authReady();
   const go=()=>fetch(SU+path,{...opt,headers:{...SH(),...(opt.headers||{})}});
   let r=await go();
-  if(r.status===401&&AUTH.refresh&&await authRefresh())r=await go();
-  if(r.status===401)gateOut("Ta session a expiré. Reconnecte-toi.");
+  if(r.status===401){
+    const ok=await authRefresh();
+    if(ok)r=await go();
+    else if(authDead||!AUTH.refresh)gateOut("Ta session a expiré. Reconnecte-toi.");
+  }
   return r;
 }
 
@@ -308,10 +384,20 @@ function showGate(msg,kind){
   g("gate").classList.add("on");g("app").style.display="none";
   const m=g("gate-mail");if(m&&AUTH.email)m.value=AUTH.email;
   if(msg)gateMsg(msg,kind||"err");
-  setTimeout(()=>{const i=g("gate-mail");if(i&&!i.value)i.focus();},60);
 }
 function gateOut(msg){authClear();showGate(msg,"err");}
 function showApp(){g("gate").classList.remove("on");g("app").style.display="flex";}
+function signInGoogle(){
+  gateMsg("Redirection vers Google…","info");
+  location.href=SU+"/auth/v1/authorize?provider=google&redirect_to="+encodeURIComponent(appURL());
+}
+function toggleMail(){
+  const f=g("gate-form"), b=g("gate-alt-b");
+  if(!f)return;
+  f.hidden=!f.hidden;
+  b.textContent=f.hidden?"Pas d'accès à ce compte Google ?":"Revenir à la connexion Google";
+  if(!f.hidden){const i=g("gate-mail");if(i){if(AUTH.email)i.value=AUTH.email;i.focus();}}
+}
 let magicBusy=false;
 async function sendMagic(){
   if(magicBusy)return;
@@ -321,7 +407,10 @@ async function sendMagic(){
   const b=g("gate-btn");if(b){b.textContent="Envoi…";b.disabled=true;}
   AUTH.email=mail;authSave();
   try{
-    const r=await fetch(SU+"/auth/v1/otp?redirect_to="+encodeURIComponent(appURL()),{method:"POST",
+    /* Pas de redirect_to : GoTrue renvoie sur le « Site URL » du projet,
+       qui pointe déjà sur cette application. Une valeur absente de la liste
+       blanche serait de toute façon ignorée. */
+    const r=await fetch(SU+"/auth/v1/otp",{method:"POST",
       headers:{"Content-Type":"application/json",apikey:SK},
       body:JSON.stringify({email:mail,create_user:true,gotrue_meta_security:{}})});
     if(r.ok){
@@ -351,8 +440,13 @@ function captureHash(){
   if(h.indexOf("access_token=")<0&&h.indexOf("error")<0)return null;
   const q=new URLSearchParams(h.replace(/^#/,""));
   try{history.replaceState(null,"",location.pathname+location.search);}catch{location.hash="";}
-  const err=q.get("error_description")||q.get("error");
-  if(err)return{err:decodeURIComponent(err.replace(/\+/g," "))};
+  const code=q.get("error")||"", desc=q.get("error_description")||"";
+  if(code||desc){
+    const e=decodeURIComponent((desc||code).replace(/\+/g," "));
+    if(/access_denied/i.test(code)||/denied|cancel/i.test(e))return{err:"Connexion annulée. Réessaie quand tu veux."};
+    if(/otp_expired|expired/i.test(code+" "+e))return{err:"Ce lien a expiré. Demande-en un nouveau."};
+    return{err:e};
+  }
   return setSession({access_token:q.get("access_token"),refresh_token:q.get("refresh_token"),
     expires_in:+(q.get("expires_in")||3600)})?{ok:true}:null;
 }
@@ -389,17 +483,19 @@ async function dbDelete(t,id){
 
 /* Les cinq tables attendues par l'app. */
 const TABLES=[["projects","Véhicules"],["perso_expenses","Dépenses perso"],
-  ["capital_injections","Apports"],["settings","Réglages"],["events","Agenda"]];
+  ["capital_injections","Mouvements"],["settings","Réglages"],["events","Agenda"],
+  ["fixed_charges","Charges fixes"]];
 const SQL_SETUP=`create table if not exists projects           (id text primary key, data jsonb, updated_at timestamptz default now());
 create table if not exists perso_expenses     (id text primary key, data jsonb);
 create table if not exists capital_injections (id text primary key, data jsonb);
 create table if not exists settings           (id text primary key, data jsonb, updated_at timestamptz default now());
 create table if not exists events             (id text primary key, data jsonb, updated_at timestamptz default now());
+create table if not exists fixed_charges      (id text primary key, data jsonb, updated_at timestamptz default now());
 
 do $$
 declare t text;
 begin
-  foreach t in array array['projects','perso_expenses','capital_injections','settings','events'] loop
+  foreach t in array array['projects','perso_expenses','capital_injections','settings','events','fixed_charges'] loop
     execute format('alter table %I enable row level security', t);
     begin
       execute format('create policy "acces anon" on %I for all to anon using (true) with check (true)', t);
@@ -476,10 +572,10 @@ const DEF_SET={
   tresoManuelle:0, maxEngagePct:70, maxDays:21, targetMargin:30,
   objectifMarge:3000, objectifVentes:3,
   gcalClientId:"", gcalCalendarId:"primary", gcalAuto:true,
-  customCats:[], customPersoCats:[], notifs:false
+  customCats:[], customPersoCats:[], notifs:false, objectifsMois:{}
 };
 let S={
-  projects:[], perso:[], caps:[], events:[],
+  projects:[], perso:[], caps:[], events:[], charges:[],
   settings:{...DEF_SET},
   meta:{streak:0,best:0,lastOpen:"",opens:0,seenBadges:[]},
   view:"today", selected:null, tab:null,
@@ -502,6 +598,12 @@ const CAT=[
 const PCAT=[{id:"essence",label:"Carburant",icon:"⛽"},{id:"nourriture",label:"Repas",icon:"🍽️"},
  {id:"deplacement",label:"Déplacement",icon:"🚌"},{id:"telephone",label:"Téléphone",icon:"📱"},
  {id:"materiel",label:"Matériel",icon:"🧰"},{id:"autre_p",label:"Autre",icon:"📦"}];
+const CHCAT=[
+ {id:"loyer",label:"Loyer / atelier",icon:"🏭"},{id:"assurance",label:"Assurance",icon:"🛡️"},
+ {id:"salaire",label:"Salaire / URSSAF",icon:"👷"},{id:"telecom",label:"Téléphone / internet",icon:"📱"},
+ {id:"vehicule",label:"Véhicule de service",icon:"🚐"},{id:"outillage",label:"Outillage / consommables",icon:"🧰"},
+ {id:"logiciel",label:"Abonnements / annonces",icon:"💻"},{id:"compta",label:"Comptable",icon:"📊"},
+ {id:"banque",label:"Frais bancaires / prêt",icon:"🏦"},{id:"autre_c",label:"Autre",icon:"📦"}];
 const STATUS={
   previsionnel:{label:"Prévisionnel",color:"var(--proj)",bg:"var(--proj-s)",short:"Prév."},
   acquisition:{label:"Acheté",color:"#60A5FA",bg:"rgba(96,165,250,.12)",short:"Acheté"},
@@ -561,10 +663,53 @@ function relDay(iso){const dd=dBetween(today(),iso);
   if(dd>1&&dd<7)return"dans "+dd+" jours";if(dd<-1&&dd>-7)return"il y a "+(-dd)+" jours";return dLabel(iso);}
 function monthKey(iso){return(iso||"").slice(0,7);}
 function monthLabel(k){const[y,m]=k.split("-");return MONTHS[+m-1]+" "+y;}
+function monthAdd(k,n){const[y,m]=k.split("-").map(Number);const d=new Date(y,m-1+n,1);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+function monthDiff(a,b){const[ya,ma]=a.split("-").map(Number),[yb,mb]=b.split("-").map(Number);
+  return (yb-ya)*12+(mb-ma);}
+const thisMonth=()=>monthKey(today());
 
 /* ══════════════════════════════════════════════════════════════
    5. MOTEUR FINANCIER  (logique métier d'origine, conservée)
    ══════════════════════════════════════════════════════════════ */
+/* Charges fixes — une ligne par charge récurrente, due chaque mois entre
+   son mois de début et son mois de fin (vide = toujours en cours). */
+const chcat=id=>CHCAT.find(c=>c.id===id)||{icon:"📦",label:id||"Autre"};
+function chargeDueLe(c,k){
+  if(!c||c.pause)return 0;
+  if(c.start&&k<c.start)return 0;
+  if(c.end&&k>c.end)return 0;
+  return +c.amount||0;
+}
+function chargesDuMois(k){return (S.charges||[]).reduce((s,c)=>s+chargeDueLe(c,k),0);}
+function chargesCumul(uptoK){
+  uptoK=uptoK||thisMonth();
+  return (S.charges||[]).reduce((s,c)=>{
+    if(c.pause)return s;
+    const st=c.start||uptoK;
+    if(st>uptoK)return s;
+    const en=(c.end&&c.end<uptoK)?c.end:uptoK;
+    const n=monthDiff(st,en)+1;
+    return s+(n>0?n*(+c.amount||0):0);
+  },0);
+}
+const chargesActives=()=>(S.charges||[]).filter(c=>!c.pause&&(!c.end||c.end>=thisMonth()));
+
+/* Marge cible : celle du véhicule si elle est renseignée, sinon la générale. */
+const targetOf=p=>(p&&p.targetMargin!=null&&p.targetMargin!=="")?+p.targetMargin:(S.settings.targetMargin||30);
+
+/* Objectif du mois : celui fixé pour ce mois-là, sinon l'objectif par défaut. */
+function objectifOf(k){
+  const o=(S.settings.objectifsMois||{})[k]||null;
+  return{
+    marge:o&&o.marge!=null?+o.marge:(S.settings.objectifMarge||0),
+    ventes:o&&o.ventes!=null?+o.ventes:(S.settings.objectifVentes||0),
+    propre:!!o
+  };
+}
+/* Mouvement de trésorerie : un retrait compte en négatif. */
+const capSigned=c=>(c.type==="retrait"?-1:1)*(+c.amount||0);
+
 function pStat(p){
   const ex=p.expenses||[];
   const rep=ex.reduce((s,e)=>s+(+e.amount||0),0);
@@ -616,7 +761,7 @@ function scoreVente(p){
 }
 function calcTreso(){
   const base=S.settings.tresoManuelle||0;
-  const inj=(S.caps||[]).reduce((s,i)=>s+(+i.amount||0),0);
+  const inj=(S.caps||[]).reduce((s,i)=>s+capSigned(i),0);
   const sold=S.projects.filter(p=>p.status==="vendu");
   const active=S.projects.filter(p=>!["vendu","annule","previsionnel"].includes(p.status));
   const activeNoPause=active.filter(p=>p.status!=="pause");
@@ -628,7 +773,9 @@ function calcTreso(){
   const achatsPaids=S.projects.filter(p=>p.projectType!=="depot_vente"&&!["annule","previsionnel"].includes(p.status)).reduce((s,p)=>s+(p.buyPrice||0),0);
   const fraisPayes=S.projects.filter(p=>!["annule","previsionnel"].includes(p.status)).reduce((s,p)=>s+pStat(p).repPaid,0);
   const depPerso=(S.perso||[]).reduce((s,e)=>s+(+e.amount||0),0);
-  const tresoReelle=base+inj+ventesAchat+commissions-achatsPaids-fraisPayes-depPerso;
+  const charges=chargesCumul();                 /* charges fixes déjà dues */
+  const chargeMens=chargesDuMois(thisMonth());  /* ce que coûte un mois */
+  const tresoReelle=base+inj+ventesAchat+commissions-achatsPaids-fraisPayes-depPerso-charges;
 
   const fraisPrevusActif=activeNoPause.reduce((s,p)=>s+pStat(p).repPrev,0);
   const fraisPrevusPrev=prev.reduce((s,p)=>s+pStat(p).rep,0);
@@ -641,7 +788,7 @@ function calcTreso(){
   const cashImmo=immo(active), cashImmoNoPause=immo(activeNoPause), cashImmoPause=immo(paused);
   const aRentrer=activeNoPause.reduce((s,p)=>{const st=pStat(p);return st.se>0?s+st.se:s;},0);
 
-  return{base,inj,ventesAchat,commissions,achatsPaids,fraisPayes,depPerso,tresoReelle,
+  return{base,inj,ventesAchat,commissions,achatsPaids,fraisPayes,depPerso,charges,chargeMens,tresoReelle,
     fraisPrevus,fraisPrevusActif,fraisPrevusPrev,achatsPrev,tresoDisponible,tresoFinaleEst,
     cashImmo,cashImmoNoPause,cashImmoPause,aRentrer,active,activeNoPause,paused,prev,sold};
 }
@@ -905,7 +1052,12 @@ let syncTimer=null, syncState="loading";
 function setSync(st){syncState=st;renderSyncChip();}
 function renderSyncChip(){
   const d=g("sdot"),t=g("stxt");if(!d||!t)return;
-  const map={ok:["var(--ok)","Synchronisé"],err:["var(--bad)","Hors ligne"],loading:["var(--warn)","Enregistrement…"]};
+  const offline=("onLine"in navigator)&&!navigator.onLine;
+  const map={
+    ok:["var(--ok)","Synchronisé"],
+    err:offline?["var(--warn)","Hors ligne — reprise auto"]
+               :["var(--bad)",retryTimer?"Nouvelle tentative…":"Envoi refusé"],
+    loading:["var(--warn)","Enregistrement…"]};
   const[c,l]=map[syncState]||map.loading;
   d.style.background=c;
   t.textContent=GC.busy?"Google…":(gcalConnected()?l+" · Google":l);
@@ -915,26 +1067,46 @@ function save(){
   S._dirty=true;
   try{
     localStorage.setItem(LS,JSON.stringify({projects:S.projects,perso:S.perso,caps:S.caps,events:S.events,
-      settings:S.settings,meta:S.meta,trash:S._gcalTrash||[]}));
+      charges:S.charges||[],settings:S.settings,meta:S.meta,trash:S._gcalTrash||[]}));
   }catch{}
   if(syncTimer)clearTimeout(syncTimer);
   setSync("loading");
   syncTimer=setTimeout(()=>{syncTimer=null;pushRemote();},1400);
 }
+let retryTimer=null, retryStep=0;
+function scheduleRetry(){
+  if(retryTimer||(!authed()&&!AUTH.refresh))return;
+  const wait=Math.min(60000,8000*Math.pow(2,retryStep++));
+  retryTimer=setTimeout(()=>{retryTimer=null;resync();},wait);
+}
+/* Reprise complète : on récupère une session, on rattrape la lecture qui a
+   échoué au démarrage, puis on renvoie ce qui attend. */
+async function resync(){
+  const ok=await authReady();
+  if(!ok){
+    if(AUTH.refresh&&!authDead){setSync("err");scheduleRetry();}
+    return false;
+  }
+  if(!lastPull){const got=await pullRemote();if(got)render();}
+  return pushRemote();
+}
+function cancelRetry(){if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}retryStep=0;}
+
 async function pushRemote(){
   try{
     const jobs=[dbUpsert("settings",[{id:"main",data:S.settings,updated_at:new Date().toISOString()}])];
     if(S.projects.length)jobs.push(dbUpsert("projects",S.projects.map(p=>({id:p.id,data:p,updated_at:new Date().toISOString()}))));
     if(S.perso.length)jobs.push(dbUpsert("perso_expenses",S.perso.map(e=>({id:e.id,data:e}))));
     if(S.caps.length)jobs.push(dbUpsert("capital_injections",S.caps.map(c=>({id:c.id,data:c}))));
+    if((S.charges||[]).length)jobs.push(dbUpsert("fixed_charges",S.charges.map(c=>({id:c.id,data:c,updated_at:new Date().toISOString()}))));
     const local=S.events.filter(e=>e.src!=="gcal");
     if(local.length)jobs.push(dbUpsert("events",local.map(e=>({id:e.id,data:e,updated_at:new Date().toISOString()}))));
     const r=await Promise.all(jobs);
     const ok=r.every(Boolean);
-    if(ok)S._dirty=false;
+    if(ok){S._dirty=false;cancelRetry();}else scheduleRetry();
     setSync(ok?"ok":"err");
     return ok;
-  }catch{setSync("err");return false;}
+  }catch{scheduleRetry();setSync("err");return false;}
 }
 function syncNow(){
   if(syncTimer){clearTimeout(syncTimer);syncTimer=null;}
@@ -950,7 +1122,7 @@ function loadLocal(){
     const raw=localStorage.getItem(LS)||localStorage.getItem("gbv8");
     if(!raw)return false;
     const d=JSON.parse(raw);
-    S.projects=d.projects||[];S.perso=d.perso||[];S.caps=d.caps||[];S.events=d.events||[];
+    S.projects=d.projects||[];S.perso=d.perso||[];S.caps=d.caps||[];S.events=d.events||[];S.charges=d.charges||[];
     if(d.settings)S.settings={...DEF_SET,...d.settings};
     if(d.meta)S.meta={...S.meta,...d.meta};
     S._gcalTrash=d.trash||[];
@@ -970,14 +1142,15 @@ function mergeById(remote,local){
 let lastPull=0;
 async function pullRemote(){
   try{
-    const[pr,pe,se,ca,ev]=await Promise.all([dbGet("projects"),dbGet("perso_expenses"),
-      dbGet("settings"),dbGet("capital_injections"),dbGet("events")]);
+    const[pr,pe,se,ca,ev,ch]=await Promise.all([dbGet("projects"),dbGet("perso_expenses"),
+      dbGet("settings"),dbGet("capital_injections"),dbGet("events"),dbGet("fixed_charges")]);
     if(pr===null)return false;                      /* serveur injoignable ou table absente */
     const R=rows=>(rows||[]).map(r=>r.data||r);
     S.projects=mergeById(R(pr),S.projects);
     if(pe!==null)S.perso=mergeById(R(pe),S.perso);
     if(ca!==null)S.caps=mergeById(R(ca),S.caps);
     if(ev!==null)S.events=mergeById(R(ev),S.events);
+    if(ch!==null)S.charges=mergeById(R(ch),S.charges||[]);
     if(se&&se.length&&se[0].data)S.settings={...S.settings,...se[0].data};
     S.projects.forEach(p=>{p.expenses=p.expenses||[];p.timeEntries=p.timeEntries||[];});
     /* Ce qui vient du serveur est déjà à jour : inutile de le renvoyer. */
@@ -985,6 +1158,7 @@ async function pullRemote(){
     if(pe)_mark("perso_expenses",pe.map(r=>({id:r.id,data:r.data||r})));
     if(ca)_mark("capital_injections",ca.map(r=>({id:r.id,data:r.data||r})));
     if(ev)_mark("events",ev.map(r=>({id:r.id,data:r.data||r})));
+    if(ch)_mark("fixed_charges",ch.map(r=>({id:r.id,data:r.data||r})));
     lastPull=Date.now();
     return true;
   }catch{return false;}
@@ -994,13 +1168,14 @@ async function loadAll(){
   loadLocal();
   S.projects.forEach(p=>{p.expenses=p.expenses||[];p.timeEntries=p.timeEntries||[];});
   render();
-  const before=JSON.stringify([S.projects,S.perso,S.caps,S.events.filter(e=>e.src!=="gcal")]);
+  const before=JSON.stringify([S.projects,S.perso,S.caps,S.charges||[],S.events.filter(e=>e.src!=="gcal")]);
   const ok=await pullRemote();
   setSync(ok?"ok":"err");
+  if(!ok)scheduleRetry();
   streakTick();
   render();
   /* Des données locales que le serveur ne connaît pas encore ? On les lui envoie. */
-  if(ok&&JSON.stringify([S.projects,S.perso,S.caps,S.events.filter(e=>e.src!=="gcal")])!==before)save();
+  if(ok&&JSON.stringify([S.projects,S.perso,S.caps,S.charges||[],S.events.filter(e=>e.src!=="gcal")])!==before)save();
   if(S.settings.gcalAuto&&gcalReady()){restoreToken();gcalConnect(true).then(g=>{if(g)gcalSync(true);});}
 }
 
@@ -1036,10 +1211,14 @@ function badges(){
 }
 function monthStats(k){
   const sold=S.projects.filter(p=>p.status==="vendu"&&monthKey(p.exitDate)===k);
+  const marge=sold.reduce((s,p)=>s+pStat(p).profitR,0);
+  const charges=chargesDuMois(k);
   return{
     n:sold.length,
     ca:sold.reduce((s,p)=>s+(pStat(p).sr||pStat(p).com),0),
-    marge:sold.reduce((s,p)=>s+pStat(p).profitR,0),
+    marge,                       /* marge dégagée par les ventes */
+    charges,                     /* charges fixes du mois */
+    margeNette:marge-charges,    /* ce qui reste vraiment */
     sold
   };
 }
@@ -1202,7 +1381,7 @@ function evRow(e,opts={}){
 function vToday(){
   const t=calcTreso(), al=alerts(), td=todo();
   const mk=monthKey(today()), ms=monthStats(mk);
-  const objM=S.settings.objectifMarge||0, objV=S.settings.objectifVentes||0;
+  const _ob=objectifOf(thisMonth()); const objM=_ob.marge, objV=_ob.ventes;
   const pct=objM>0?ms.marge/objM:0;
   const evToday=evOn(today()), evTom=evOn(addDays(today(),1));
   const late=evOpenPast();
@@ -1464,7 +1643,7 @@ function agMonth(){
   const ms=monthStats(k);
   h+=`<div class="g3" style="margin-top:12px">
     ${kpi("Ventes du mois",ms.n,"var(--ok)",ms.n?fmt(ms.ca)+" encaissés":"aucune vente")}
-    ${kpi("Marge du mois",fmt(ms.marge),ms.marge>=0?"var(--ok)":"var(--bad)","objectif "+fmt(S.settings.objectifMarge||0))}
+    ${kpi("Marge du mois",fmt(ms.marge),ms.marge>=0?"var(--ok)":"var(--bad)","objectif "+fmt(objectifOf(thisMonth()).marge))}
     ${kpi("Rendez-vous",evBetween(k+"-01",k+"-31").length,"var(--acc)","dont "+evBetween(k+"-01",k+"-31").filter(e=>e.done).length+" faits")}
   </div>`;
   return h;
@@ -1537,7 +1716,7 @@ function vStock(){
 function cardStock(p,dim){
   const s=pStat(p), st=STATUS[p.status], d=dSince(p.entryDate), sc=priorityScore(p), pr=priorityLabel(sc);
   const isD=p.projectType==="depot_vente";
-  const reco=!isD&&p.buyPrice>0?Math.round(s.investedTotal*(1+(S.settings.targetMargin||30)/100)/100)*100:0;
+  const reco=!isD&&p.buyPrice>0?Math.round(s.investedTotal*(1+targetOf(p)/100)/100)*100:0;
   const nextEv=evOfProject(p.id).find(e=>!e.done&&e.date>=today());
   const ratio=s.se>0?s.invested/s.se:0;
   return`<div class="card pad" style="cursor:pointer;${dim?"opacity:.55;":""}border-color:${!dim&&sc>=4?"rgba(244,82,91,.28)":"var(--line)"}" data-p="${p.id}">
@@ -1572,7 +1751,7 @@ function vDetail(){
   const s=pStat(p), isD=p.projectType==="depot_vente";
   const d=p.status==="vendu"?dBetween(p.entryDate,p.exitDate):dSince(p.entryDate);
   const hrs=(p.timeEntries||[]).reduce((a,t)=>a+(+t.hours||0),0);
-  const reco=!isD&&p.buyPrice>0?Math.round(s.investedTotal*(1+(S.settings.targetMargin||30)/100)/100)*100:0;
+  const reco=!isD&&p.buyPrice>0?Math.round(s.investedTotal*(1+targetOf(p)/100)/100)*100:0;
   const sc=p.status==="vendu"?scoreVente(p):null;
   const evs=evOfProject(p.id);
 
@@ -1710,7 +1889,7 @@ function vDetail(){
     ${mini("En stock",d!==null?d+" j":"—",d>(S.settings.maxDays||21)?"var(--bad)":"var(--ok)")}
     ${mini("Marge par jour",d>0&&s.profitE>0?fmt(s.profitE/d)+"/j":"—","var(--warn)")}
     ${reco>0&&p.status!=="vendu"?mini("Prix conseillé",fmt(reco),"var(--proj)"):mini("Heures",hrs?hrs.toFixed(1)+" h":"—","#C084FC")}
-    ${mini("Rentabilité",s.roi?Math.round(s.roi)+" %":"—",s.roi>=(S.settings.targetMargin||30)?"var(--ok)":"var(--tx2)")}
+    ${mini("Rentabilité",s.roi?Math.round(s.roi)+" %":"—",s.roi>=targetOf(p)?"var(--ok)":"var(--tx2)")}
   </div>`;
 
   if(!["vendu","annule"].includes(p.status)){
@@ -1813,9 +1992,10 @@ function chartMonths(){
    ══════════════════════════════════════════════════════════════ */
 function vTreso(){
   const tab=S.tab||"vue";
-  let h=`<div class="tabs" style="margin-bottom:14px">${[["vue","Vue d'ensemble"],["mouv","Mouvements"],["perso","Dépenses perso"]].map(([k,l])=>
+  let h=`<div class="tabs" style="margin-bottom:14px">${[["vue","Vue d'ensemble"],["mouv","Journal"],["charges","Charges fixes"],["perso","Dépenses perso"]].map(([k,l])=>
     `<button class="tab${tab===k?" on":""}" onclick="setTab('${k}')">${l}</button>`).join("")}</div>`;
   if(tab==="mouv")return h+tresoMouv();
+  if(tab==="charges")return h+tresoCharges();
   if(tab==="perso")return h+tresoPerso();
   return h+tresoVue();
 }
@@ -1851,7 +2031,8 @@ function tresoVue(){
         t.commissions>0?["Commissions","+"+fmtX(t.commissions),"var(--dep)"]:null,
         t.achatsPaids>0?["Achats","−"+fmtX(t.achatsPaids),"var(--bad)"]:null,
         t.fraisPayes>0?["Frais payés","−"+fmtX(t.fraisPayes),"var(--bad)"]:null,
-        t.depPerso>0?["Dépenses perso","−"+fmtX(t.depPerso),"var(--dep)"]:null
+        t.depPerso>0?["Dépenses perso","−"+fmtX(t.depPerso),"var(--dep)"]:null,
+        t.charges>0?["Charges fixes","−"+fmtX(t.charges),"var(--dep)"]:null
       ].filter(Boolean).map(([l,v,c])=>`<div class="sp" style="padding:2px 0;font-size:12px"><span style="color:var(--tx3)">${l}</span><span class="n" style="color:${c}">${v}</span></div>`).join("")}</div>
     </div>
     <div class="card pad" style="border-color:rgba(167,139,250,.22)">
@@ -1883,7 +2064,7 @@ function tresoVue(){
     ${kpi("Part engagée",pct+" %",pct>maxPct?"var(--bad)":"var(--ok)","ta limite : "+maxPct+" %")}
     ${kpi("Marge encaissée",fmt(profit),profit>=0?"var(--ok)":"var(--bad)",sold.length+" vente"+(sold.length>1?"s":""))}
     ${kpi("Rotation moyenne",avgD+" j","var(--warn)","objectif "+(S.settings.maxDays||21)+" j")}
-    ${kpi("Rentabilité moyenne",roi.toFixed(1)+" %","#C084FC","")}
+    ${kpi("Charges fixes / mois",fmt(t.chargeMens),t.chargeMens>0?"var(--dep)":"var(--tx3)",chargesActives().length+" charge"+(chargesActives().length>1?"s":"")+" en cours")}
     ${kpi("Marge par jour",fmt(epjM),"var(--proj)","sur les ventes gagnantes")}
   </div>`;
 
@@ -1921,37 +2102,140 @@ function tresoVue(){
   h+=`</tbody></table></div></div>`;
   return h;
 }
-function tresoMouv(){
-  const t=calcTreso();
-  let h=`<div class="g2">`;
-  h+=`<div class="card pad"><div class="hd">Ce qui est sorti<span class="n" style="color:var(--bad);font-size:12px;font-weight:600">−${fmtX(t.achatsPaids+t.fraisPayes+t.depPerso)}</span></div>`;
-  S.projects.filter(p=>p.projectType!=="depot_vente"&&!["annule","previsionnel"].includes(p.status)&&(p.buyPrice||0)>0)
-    .forEach(p=>{const s=pStat(p);
-      h+=`<div class="ln" data-p="${p.id}" style="cursor:pointer"><span class="dot" style="background:${STATUS[p.status]?.color}"></span>
-        <div style="flex:1;min-width:0"><div class="el" style="font-size:12.5px;font-weight:600">${esc(pName(p))}</div>
-        <div style="font-size:11px;color:var(--tx3)">achat + ${fmtX(s.repPaid)} de frais</div></div>
-        <span class="n" style="color:var(--bad);font-weight:600">−${fmtX((p.buyPrice||0)+s.repPaid)}</span></div>`;});
-  if(t.depPerso>0)h+=`<div class="ln" style="cursor:pointer" onclick="setTab('perso')"><span>💸</span>
-    <div style="flex:1"><div style="font-size:12.5px;font-weight:600">Dépenses personnelles</div></div>
-    <span class="n" style="color:var(--dep)">−${fmtX(t.depPerso)}</span></div>`;
-  h+=`</div>`;
+/* Journal : chaque entrée et sortie d'argent, datée, avec le solde qui suit. */
+function journal(){
+  const out=[];
+  const add=(date,icon,label,sub,amount,del,pid)=>{
+    if(!date)return;
+    out.push({date:String(date).slice(0,10),icon,label,sub:sub||"",amount,del:del||"",pid:pid||""});
+  };
+  (S.caps||[]).forEach(c=>add(c.date,c.type==="retrait"?"📤":"💉",
+    c.type==="retrait"?"Retrait":"Apport",c.note||"",capSigned(c),"cap:"+c.id));
 
-  h+=`<div class="card pad"><div class="hd">Ce qui est rentré<span class="n" style="color:var(--ok);font-size:12px;font-weight:600">+${fmtX(t.ventesAchat+t.commissions+t.inj)}</span></div>`;
-  (S.caps||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).forEach(i=>{
-    h+=`<div class="ln"><span>💉</span><div style="flex:1;min-width:0">
-      <div style="font-size:12.5px;font-weight:600">Apport — ${dLabel(i.date)}</div>
-      ${i.note?`<div class="el" style="font-size:11px;color:var(--tx3)">${esc(i.note)}</div>`:""}</div>
-      <span class="n" style="color:#60A5FA">+${fmtX(i.amount)}</span>
-      <button class="del" data-delcap="${i.id}">×</button></div>`;});
-  t.sold.forEach(p=>{
-    const s=pStat(p);
-    const enc=p.projectType==="depot_vente"?(p.commission||0):(p.montantEncaisse||p.saleRealPrice||0);
-    if(!enc)return;
-    h+=`<div class="ln" data-p="${p.id}" style="cursor:pointer"><span>${p.projectType==="depot_vente"?"🤝":"🏁"}</span>
-      <div style="flex:1;min-width:0"><div class="el" style="font-size:12.5px;font-weight:600">${esc(pName(p))}</div>
-      <div style="font-size:11px;color:${s.profitR>=0?"var(--ok)":"var(--bad)"}">marge ${fmtX(s.profitR)}</div></div>
-      <span class="n" style="color:var(--ok);font-weight:600">+${fmtX(enc)}</span></div>`;});
-  h+=`<button class="btn btn-ok btn-full btn-sm" style="margin-top:10px" onclick="openModal('injection')">Enregistrer un apport</button></div></div>`;
+  S.projects.forEach(p=>{
+    if(["annule","previsionnel"].includes(p.status))return;
+    if(p.projectType!=="depot_vente"&&(p.buyPrice||0)>0)
+      add(p.buyDate||p.entryDate,"🚗","Achat — "+pName(p),"",-(p.buyPrice||0),"",p.id);
+    (p.expenses||[]).filter(e=>e.paid!==false).forEach(e=>
+      add(e.date||p.entryDate,cat(e.category).icon,e.label||"Frais",pName(p),-(+e.amount||0),"",p.id));
+    if(p.status==="vendu"){
+      const enc=p.projectType==="depot_vente"?(p.commission||0):(p.montantEncaisse||p.saleRealPrice||0);
+      if(enc)add(p.exitDate,p.projectType==="depot_vente"?"🤝":"🏁",
+        (p.projectType==="depot_vente"?"Commission — ":"Vente — ")+pName(p),"",enc,"",p.id);
+    }
+  });
+  (S.perso||[]).forEach(e=>add(e.date,pcat(e.category).icon,e.label||"Dépense perso","perso",-(+e.amount||0)));
+
+  (S.charges||[]).forEach(c=>{
+    if(c.pause)return;
+    const now=thisMonth();
+    let k=c.start||now;
+    const en=(c.end&&c.end<now)?c.end:now;
+    for(let n=0;k<=en&&n<360;n++,k=monthAdd(k,1))
+      add(k+"-"+String(Math.min(28,Math.max(1,+c.day||1))).padStart(2,"0"),
+        chcat(c.cat).icon,c.label||chcat(c.cat).label,"charge fixe",-(+c.amount||0));
+  });
+
+  out.sort((a,b)=>a.date.localeCompare(b.date));
+  let bal=S.settings.tresoManuelle||0;
+  out.forEach(e=>{bal+=e.amount;e.solde=bal;});
+  return out;
+}
+function tresoMouv(){
+  const t=calcTreso(), all=journal();
+  let h=`<div class="g3" style="margin-bottom:13px">
+    ${kpi("Solde actuel",fmtX(t.tresoReelle),t.tresoReelle>=0?"var(--ok)":"var(--bad)",all.length+" mouvement"+(all.length>1?"s":""))}
+    ${kpi("Entré",  "+"+fmtX(all.filter(e=>e.amount>0).reduce((s,e)=>s+e.amount,0)),"var(--ok)","depuis le début")}
+    ${kpi("Sorti",  "−"+fmtX(Math.abs(all.filter(e=>e.amount<0).reduce((s,e)=>s+e.amount,0))),"var(--bad)","depuis le début")}
+  </div>`;
+
+  h+=`<div class="card pad" style="margin-bottom:13px"><div class="sp" style="flex-wrap:wrap;gap:9px">
+    <div><div style="font-size:12.5px;font-weight:600">Point de départ</div>
+    <div style="font-size:11.5px;color:var(--tx3)">Le solde du compte avant tout ce qui est listé ici.</div></div>
+    <div class="flex" style="gap:7px">
+      <input type="number" id="tbase" value="${S.settings.tresoManuelle||""}" placeholder="0" class="n" style="width:150px">
+      <button class="btn btn-ok btn-sm" onclick="saveBase()" style="white-space:nowrap">Valider</button>
+    </div></div></div>`;
+
+  h+=`<div class="wrap" style="margin-bottom:13px">
+    <button class="btn btn-ok btn-sm" onclick="openModal('injection')">Enregistrer un apport</button>
+    <button class="btn btn-bad btn-sm" onclick="openModal('retrait')">Enregistrer un retrait</button>
+    <button class="btn btn-sm" onclick="setTab('charges')">Gérer les charges fixes</button>
+  </div>`;
+
+  if(!all.length)return h+`<div class="card"><div class="empty"><div class="ei">📒</div>Aucun mouvement pour l'instant.<div style="font-size:12px;margin-top:6px">Les achats, frais, ventes, apports et charges viendront s'inscrire ici tout seuls.</div></div></div>`;
+
+  const by={};
+  all.forEach(e=>{const k=monthKey(e.date);(by[k]=by[k]||[]).push(e);});
+  Object.keys(by).sort().reverse().forEach(k=>{
+    const items=by[k].slice().reverse();
+    const net=by[k].reduce((s,e)=>s+e.amount,0);
+    const fin=by[k][by[k].length-1].solde;
+    h+=`<div class="card pad" style="margin-bottom:10px">
+      <div class="sp" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;font-weight:600;text-transform:capitalize">${monthLabel(k)}</div>
+        <div class="flex" style="gap:12px">
+          <span class="n" style="font-size:12px;color:${net>=0?"var(--ok)":"var(--bad)"};font-weight:700">${net>=0?"+":"−"}${fmtX(Math.abs(net))}</span>
+          <span class="n" style="font-size:12px;color:var(--tx3)">solde ${fmtX(fin)}</span>
+        </div></div><div class="hr" style="margin:0 0 5px"></div>`;
+    items.forEach(e=>{
+      h+=`<div class="ln"${e.pid?` data-p="${e.pid}" style="cursor:pointer"`:""}>
+        <span style="width:20px;text-align:center">${e.icon}</span>
+        <div style="flex:1;min-width:0">
+          <div class="el" style="font-size:12.5px;font-weight:600">${esc(e.label)}</div>
+          <div class="el" style="font-size:11px;color:var(--tx3)">${dLabel(e.date)}${e.sub?" · "+esc(e.sub):""}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div class="n" style="font-size:12.5px;font-weight:600;color:${e.amount>=0?"var(--ok)":"var(--bad)"}">${e.amount>=0?"+":"−"}${fmtX(Math.abs(e.amount))}</div>
+          <div class="n" style="font-size:10.5px;color:var(--tx3)">${fmtX(e.solde)}</div>
+        </div>
+        ${e.del.startsWith("cap:")?`<button class="del" data-delcap="${e.del.slice(4)}">×</button>`:""}</div>`;
+    });
+    h+=`</div>`;
+  });
+  return h;
+}
+
+/* Charges fixes — loyer, assurance, salaires, abonnements. */
+function tresoCharges(){
+  const list=(S.charges||[]).slice().sort((a,b)=>(+b.amount||0)-(+a.amount||0));
+  const mens=chargesDuMois(thisMonth());
+  const cumul=chargesCumul();
+  const ms=monthStats(thisMonth());
+  let h=`<div class="g3" style="margin-bottom:13px">
+    ${kpi("Coût mensuel",fmtX(mens),mens>0?"var(--dep)":"var(--tx3)",chargesActives().length+" charge"+(chargesActives().length>1?"s":"")+" en cours")}
+    ${kpi("Déjà supporté",fmtX(cumul),"var(--bad)","depuis le premier mois")}
+    ${kpi("Marge nette du mois",fmtX(ms.margeNette),ms.margeNette>=0?"var(--ok)":"var(--bad)",fmtX(ms.marge)+" de marge − "+fmtX(ms.charges))}
+  </div>`;
+
+  h+=`<div class="card pad" style="margin-bottom:13px">
+    <div class="sp" style="flex-wrap:wrap;gap:9px">
+      <div style="max-width:520px"><div style="font-size:12.5px;font-weight:600">Ce que le garage coûte, véhicules mis à part</div>
+      <div style="font-size:11.5px;color:var(--tx3);line-height:1.55;margin-top:2px">Saisi une fois, déduit automatiquement chaque mois de la trésorerie et de la marge nette. ${mens>0?`Il faut dégager <b class="n">${fmtX(mens)}</b> de marge par mois rien que pour être à l'équilibre.`:""}</div></div>
+      <button class="btn btn-p btn-sm" onclick="openModal('charge')" style="white-space:nowrap">Ajouter une charge</button>
+    </div></div>`;
+
+  if(!list.length)return h+`<div class="card"><div class="empty"><div class="ei">🏭</div>Aucune charge fixe enregistrée.
+    <div style="font-size:12px;margin-top:6px;max-width:420px;margin-left:auto;margin-right:auto;line-height:1.6">Loyer de l'atelier, assurance, téléphone, salaires, abonnements aux annonces : ajoute-les une fois et l'app les décompte toute seule.</div></div></div>`;
+
+  const now=thisMonth();
+  h+=`<div class="card pad"><div class="hd">Tes charges<span class="n" style="color:var(--dep);font-weight:700">${fmtX(mens)} / mois</span></div>`;
+  list.forEach(c=>{
+    const cc=chcat(c.cat);
+    const finie=c.end&&c.end<now, off=c.pause||finie;
+    const depuis=c.start?monthDiff(c.start,(c.end&&c.end<now)?c.end:now)+1:0;
+    h+=`<div class="ln" style="${off?"opacity:.45":""}">
+      <span style="width:20px;text-align:center">${cc.icon}</span>
+      <div style="flex:1;min-width:0">
+        <div class="el" style="font-size:12.5px;font-weight:600">${esc(c.label||cc.label)}</div>
+        <div class="el" style="font-size:11px;color:var(--tx3)">${cc.label}${c.start?" · depuis "+monthLabel(c.start):""}${finie?" · terminée en "+monthLabel(c.end):(c.pause?" · en pause":"")}${depuis>0&&!off?" · "+depuis+" mois payés":""}</div>
+      </div>
+      <span class="n" style="font-weight:600;color:${off?"var(--tx3)":"var(--dep)"};flex-shrink:0">${fmtX(c.amount)}</span>
+      <button class="btn btn-xs" onclick="toggleCharge('${c.id}')" style="flex-shrink:0">${c.pause?"Reprendre":"Pause"}</button>
+      <button class="btn btn-xs" onclick="openModal('charge','${c.id}')" style="flex-shrink:0">Modifier</button>
+      <button class="del" onclick="delCharge('${c.id}')">×</button></div>`;
+  });
+  h+=`</div>`;
   return h;
 }
 function tresoPerso(){
@@ -2099,13 +2383,65 @@ function setObj(){
   const f=(l,k,ph,sub)=>`<div><label class="lbl">${l}</label>
     <input type="number" id="st-${k}" value="${S.settings[k]??""}" placeholder="${ph}" class="n" onchange="saveSetting('${k}',this.value)">
     ${sub?`<div style="font-size:10.5px;color:var(--tx3);margin-top:4px">${sub}</div>`:""}</div>`;
-  return`<div class="card pad" style="margin-bottom:13px"><div class="hd">Tes objectifs du mois</div>
-    <div class="g2">${f("Marge visée (€)","objectifMarge","3000","Sert de jauge sur l'écran d'accueil.")}${f("Nombre de ventes","objectifVentes","3","")}</div></div>
+
+  const mk=S._objMois||thisMonth();
+  const o=objectifOf(mk), ms=monthStats(mk), passe=mk<thisMonth();
+  const pctM=o.marge>0?Math.min(100,Math.round(ms.marge/o.marge*100)):0;
+  const pctV=o.ventes>0?Math.min(100,Math.round(ms.n/o.ventes*100)):0;
+
+  let h=`<div class="card pad" style="margin-bottom:13px">
+    <div class="sp" style="flex-wrap:wrap;gap:9px;margin-bottom:12px">
+      <div><div style="font-size:13px;font-weight:600">Objectif de <span style="text-transform:capitalize">${monthLabel(mk)}</span></div>
+      <div style="font-size:11.5px;color:var(--tx3)">${o.propre?"Objectif fixé pour ce mois":"Reprend l'objectif par défaut ci-dessous"}</div></div>
+      <div class="flex" style="gap:5px">
+        <button class="btn-ico" onclick="moisObj(-1)" aria-label="Mois précédent">‹</button>
+        <button class="btn btn-sm" onclick="moisObj(0)">Ce mois</button>
+        <button class="btn-ico" onclick="moisObj(1)" aria-label="Mois suivant">›</button>
+      </div>
+    </div>
+    <div class="g2" style="margin-bottom:11px">
+      <div><label class="lbl">Marge visée (€)</label><input type="number" id="om-marge" value="${o.marge||""}" class="n"></div>
+      <div><label class="lbl">Nombre de ventes</label><input type="number" id="om-ventes" value="${o.ventes||""}" class="n"></div>
+    </div>
+    <div class="wrap" style="margin-bottom:12px">
+      <button class="btn btn-p btn-sm" onclick="saveObjMois()">Fixer pour ${esc(monthLabel(mk))}</button>
+      ${o.propre?`<button class="btn btn-sm" onclick="clearObjMois()">Revenir à l'objectif par défaut</button>`:""}
+    </div>
+    <div class="hr"></div>
+    <div class="g2" style="gap:11px">
+      <div><div class="sp" style="font-size:11.5px;margin-bottom:4px"><span style="color:var(--tx3)">Marge ${passe?"réalisée":"en cours"}</span><span class="n" style="font-weight:600">${fmt(ms.marge)} / ${fmt(o.marge)}</span></div>
+        <div class="bar"><i style="width:${pctM}%;background:${ms.marge>=o.marge&&o.marge>0?"var(--ok)":"var(--acc)"}"></i></div></div>
+      <div><div class="sp" style="font-size:11.5px;margin-bottom:4px"><span style="color:var(--tx3)">Ventes</span><span class="n" style="font-weight:600">${ms.n} / ${o.ventes}</span></div>
+        <div class="bar"><i style="width:${pctV}%;background:${ms.n>=o.ventes&&o.ventes>0?"var(--ok)":"var(--proj)"}"></i></div></div>
+    </div>
+    ${ms.charges>0?`<div style="margin-top:11px;padding:10px 12px;border-radius:9px;background:var(--dep-s);border:1px solid rgba(251,146,60,.25);font-size:12px;color:var(--tx2)">
+      Charges fixes du mois : <b class="n">${fmtX(ms.charges)}</b>. Marge nette réelle : <b class="n" style="color:${ms.margeNette>=0?"var(--ok)":"var(--bad)"}">${fmtX(ms.margeNette)}</b>.</div>`:""}
+  </div>`;
+
+  const hist=Object.keys(S.settings.objectifsMois||{}).sort().reverse();
+  if(hist.length){
+    h+=`<div class="card pad" style="margin-bottom:13px"><div class="hd">Historique des objectifs</div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Mois</th><th style="text-align:right">Visé</th><th style="text-align:right">Réalisé</th><th style="text-align:right">Ventes</th><th style="text-align:right">Écart</th></tr></thead><tbody>`;
+    hist.forEach(k=>{
+      const ob=objectifOf(k), st=monthStats(k), ec=st.marge-ob.marge;
+      h+=`<tr class="clk" onclick="S._objMois='${k}';renderContent()">
+        <td style="text-transform:capitalize">${monthLabel(k)}</td>
+        <td class="n" style="text-align:right">${fmt(ob.marge)}</td>
+        <td class="n" style="text-align:right">${fmt(st.marge)}</td>
+        <td class="n" style="text-align:right">${st.n} / ${ob.ventes}</td>
+        <td class="n" style="text-align:right;color:${ec>=0?"var(--ok)":"var(--bad)"}">${ec>=0?"+":"−"}${fmt(Math.abs(ec))}</td></tr>`;
+    });
+    h+=`</tbody></table></div></div>`;
+  }
+
+  h+=`<div class="card pad" style="margin-bottom:13px"><div class="hd">Objectif par défaut</div>
+    <div style="font-size:12px;color:var(--tx3);line-height:1.55;margin-bottom:11px">Utilisé pour tous les mois auxquels tu n'as pas fixé d'objectif particulier.</div>
+    <div class="g2">${f("Marge visée (€)","objectifMarge","3000","")}${f("Nombre de ventes","objectifVentes","3","")}</div></div>
   <div class="card pad" style="margin-bottom:13px"><div class="hd">Tes règles de gestion</div>
     <div class="g3">
       ${f("Part de cash max en stock (%)","maxEngagePct","70","Au-delà, l'app t'alerte.")}
       ${f("Durée max en stock (jours)","maxDays","21","Déclenche une alerte de rotation.")}
-      ${f("Marge cible (%)","targetMargin","30","Sert à calculer le prix conseillé.")}
+      ${f("Marge cible (%)","targetMargin","30","Prix conseillé. Modifiable véhicule par véhicule.")}
     </div></div>
   <div class="card pad"><div class="hd">Rappels</div>
     <div class="sp" style="gap:12px">
@@ -2113,6 +2449,24 @@ function setObj(){
       <div style="font-size:11.5px;color:var(--tx3);margin-top:2px">Le navigateur t'affiche tes rendez-vous du jour à l'ouverture de l'app.</div></div>
       <button class="btn btn-sm ${S.settings.notifs?"btn-ok":""}" onclick="toggleNotifs()">${S.settings.notifs?"Activées":"Activer"}</button>
     </div></div>`;
+  return h;
+}
+function moisObj(n){
+  S._objMois=n===0?thisMonth():monthAdd(S._objMois||thisMonth(),n);
+  renderContent();
+}
+function saveObjMois(){
+  const k=S._objMois||thisMonth();
+  const m=gv("om-marge").trim(), v=gv("om-ventes").trim();
+  S.settings.objectifsMois={...(S.settings.objectifsMois||{}),
+    [k]:{marge:m===""?null:gn("om-marge"),ventes:v===""?null:gn("om-ventes")}};
+  save();render();showToast("Objectif de "+monthLabel(k)+" enregistré");
+}
+function clearObjMois(){
+  const k=S._objMois||thisMonth();
+  const o={...(S.settings.objectifsMois||{})};delete o[k];
+  S.settings.objectifsMois=o;
+  save();render();showToast("Objectif de "+monthLabel(k)+" remis par défaut");
 }
 function setConn(){
   const ok=syncState==="ok";
@@ -2121,7 +2475,7 @@ function setConn(){
     <div class="sp" style="flex-wrap:wrap;gap:10px">
       <div class="flex"><span class="dot" style="background:var(--ok)"></span>
         <div><div style="font-size:13px;font-weight:600">${esc(AUTH.email||"Connecté")}</div>
-        <div style="font-size:11.5px;color:var(--tx3)">Connexion par lien e-mail — aucun mot de passe stocké</div></div></div>
+        <div style="font-size:11.5px;color:var(--tx3)">Session ouverte — aucun mot de passe stocké sur cet appareil</div></div></div>
       <button class="btn btn-sm" onclick="signOut()">Se déconnecter</button>
     </div></div>
 
@@ -2294,6 +2648,8 @@ function openQuick(){
     S.selected?["Dépense sur "+pName(proj(S.selected)),"🔧","openModal('expense')"]:null,
     ["Dépense perso","💸","setView('treso');setTimeout(()=>setTab('perso'),0)"],
     ["Apport de fonds","💉","openModal('injection')"],
+    ["Retrait","📤","openModal('retrait')"],
+    ["Charge fixe","🏭","openModal('charge')"],
     ["Recherche","⌕","openPal()"]
   ].filter(Boolean);
   g("modal-root").innerHTML=`<div class="ov" id="mov" onclick="bgClose(event)"><div class="modal" style="max-width:380px">
@@ -2323,7 +2679,8 @@ function openModal(type,evId,date,pid,evType){
       <div id="n-a">${F.g2(F.i("Prix d'achat (€)","n-buy","number","","class='n'"),F.i("Prix de vente visé (€)","n-est","number","","class='n'"))}</div>
       <div id="n-d" style="display:none">${F.g2(F.i("Ta commission (€)","n-com","number","","class='n'"),F.i("Prix plancher du propriétaire (€)","n-own","number","","class='n'"))}</div>
       ${F.g2(F.i("Date d'entrée","n-entry","date",today()),F.s("Où en est-il ?","n-status",stOpts,"acquisition"))}
-      ${F.i("VIN","n-vin","text","","placeholder='Optionnel'")}`;
+      ${F.g2(F.i("VIN","n-vin","text","","placeholder='Optionnel'"),
+             F.i("Marge cible (%)","n-marge","number","","class='n' placeholder='"+(S.settings.targetMargin||30)+" par défaut'"))}`;
   }
   else if(type==="edit"&&p){
     title="Modifier le véhicule";fn="submitEdit()";
@@ -2333,8 +2690,10 @@ function openModal(type,evId,date,pid,evType){
         ?F.g2(F.i("Prix d'achat (€)","e-buy","number",p.buyPrice||"","class='n'"),F.i("Prix de vente visé (€)","e-est","number",p.saleEstPrice||"","class='n'"))
         :F.g2(F.i("Commission (€)","e-com","number",p.commission||"","class='n'"),F.i("Prix plancher (€)","e-own","number",p.ownerPrice||"","class='n'"))}
       ${F.g2(F.i("Date d'entrée","e-entry","date",p.entryDate||""),F.i("Date de sortie","e-exit","date",p.exitDate||""))}
-      ${F.i("VIN","e-vin","text",p.vin||"")}
-      ${F.s("Statut","e-status",stOpts,p.status)}`;
+      ${F.g2(F.i("VIN","e-vin","text",p.vin||""),
+             F.i("Marge cible (%)","e-marge","number",p.targetMargin??"","class='n' placeholder='"+(S.settings.targetMargin||30)+" par défaut'"))}
+      ${F.s("Statut","e-status",stOpts,p.status)}
+      <div style="font-size:11px;color:var(--tx3);line-height:1.5">Laisse la marge vide pour suivre la marge générale des Réglages. Elle sert à calculer le prix de vente conseillé de ce véhicule.</div>`;
   }
   else if(type==="status"&&p){
     title="Où en est ce véhicule ?";btn="";
@@ -2393,11 +2752,26 @@ function openModal(type,evId,date,pid,evType){
       ${F.i("Nom du vendeur / référence","og-lbl","text",p.originLabel||"","placeholder='Auto1, particulier, garage X…'")}
       ${F.t("Notes","og-notes",p.originNotes||"","")}`;
   }
-  else if(type==="injection"){
-    title="Apport de fonds";btn="Enregistrer";fn="submitInjection()";
+  else if(type==="injection"||type==="retrait"){
+    const ret=type==="retrait";
+    title=ret?"Retrait d'argent":"Apport de fonds";btn="Enregistrer";
+    fn=`submitMouvement('${ret?"retrait":"apport"}')`;
     body=`<div><label class="lbl">Montant (€)</label><input type="number" id="j-amt" class="n" style="font-size:22px;font-weight:700;padding:12px"></div>
       <div class="wrap">${[500,1000,2000,5000].map(v=>`<button class="btn btn-sm" onclick="g('j-amt').value=${v}">${fmt(v)}</button>`).join("")}</div>
-      ${F.g2(F.i("Date","j-date","date",today()),F.i("D'où vient cet argent ?","j-note","text","","placeholder='Apport perso, prêt…'"))}`;
+      ${F.g2(F.i("Date","j-date","date",today()),F.i(ret?"Pourquoi ce retrait ?":"D'où vient cet argent ?","j-note","text","","placeholder='"+(ret?"Rémunération, achat perso…":"Apport perso, prêt…")+"'"))}
+      <div style="font-size:11.5px;color:var(--tx3);line-height:1.5">${ret?"Le montant sera déduit de la trésorerie et apparaîtra dans le journal.":"Le montant s'ajoute à la trésorerie et apparaît dans le journal."}</div>`;
+  }
+  else if(type==="charge"){
+    const c=evId?(S.charges||[]).find(x=>x.id===evId):null;
+    title=c?"Modifier la charge":"Nouvelle charge fixe";
+    btn=c?"Enregistrer":"Ajouter";fn=`submitCharge(${c?`'${c.id}'`:"null"})`;
+    body=`${F.g2(F.i("Nom","ch-lbl","text",c?.label||"","placeholder='Loyer atelier'"),
+                 F.i("Montant par mois (€)","ch-amt","number",c?.amount??"","class='n'"))}
+      ${F.g2(F.s("Catégorie","ch-cat",CHCAT.map(x=>[x.id,x.icon+" "+x.label]),c?.cat||"loyer"),
+             F.i("Jour de prélèvement","ch-day","number",c?.day||1,"min='1' max='28' class='n'"))}
+      ${F.g2(F.i("Premier mois","ch-start","month",c?.start||thisMonth()),
+             F.i("Dernier mois","ch-end","month",c?.end||"","placeholder='vide = toujours en cours'"))}
+      <div style="font-size:11.5px;color:var(--tx3);line-height:1.55">Laisse le dernier mois vide tant que la charge court. L'app compte le nombre de mois écoulés depuis le premier mois et déduit le total de ta trésorerie.</div>`;
   }
   else if(type==="payer"){
     const pp=proj(S._payId);
@@ -2483,6 +2857,7 @@ function submitNew(){
     buyPrice:t==="achat"?gn("n-buy"):0,saleEstPrice:gn("n-est"),saleRealPrice:0,
     commission:gn("n-com"),ownerPrice:gn("n-own"),
     status:gv("n-status")||"acquisition",entryDate:gv("n-entry")||today(),
+    targetMargin:gv("n-marge").trim()===""?null:gn("n-marge"),
     expenses:[],timeEntries:[]},...S.projects];
   save();closeModal();selectProject(S.projects[0].id);
   showToast(`${brand} ${model} ajouté`);
@@ -2492,7 +2867,8 @@ function submitEdit(){
   upd(p.id,{brand:gv("e-brand").trim(),model:gv("e-model").trim(),
     year:parseInt(gv("e-year"))||p.year,plate:gv("e-plate").trim(),vin:gv("e-vin").trim(),km:gn("e-km"),
     ...(p.projectType==="depot_vente"?{commission:gn("e-com"),ownerPrice:gn("e-own")}:{buyPrice:gn("e-buy"),saleEstPrice:gn("e-est")}),
-    entryDate:gv("e-entry")||p.entryDate,exitDate:gv("e-exit")||"",status:gv("e-status")||p.status});
+    entryDate:gv("e-entry")||p.entryDate,exitDate:gv("e-exit")||"",status:gv("e-status")||p.status,
+    targetMargin:gv("e-marge").trim()===""?null:gn("e-marge")});
   showToast("Modifications enregistrées");
 }
 function submitExpense(){
@@ -2545,11 +2921,41 @@ function submitOrigin(){
   upd(p.id,{originType:gv("og-type"),originSub:sub,originLabel:gv("og-lbl").trim()||sub,originNotes:gv("og-notes").trim()});
   showToast("Provenance enregistrée");
 }
-function submitInjection(){
-  const a=gn("j-amt");
+function submitMouvement(type){
+  const a=Math.abs(gn("j-amt"));
   if(!a)return showToast("Indique le montant","err");
-  S.caps=[...S.caps,{id:uid(),amount:a,note:gv("j-note").trim(),date:gv("j-date")||today()}];
-  save();closeModal();render();showToast("Apport de "+fmtX(a)+" enregistré");
+  S.caps=[...S.caps,{id:uid(),amount:a,type:type==="retrait"?"retrait":"apport",
+    note:gv("j-note").trim(),date:gv("j-date")||today()}];
+  save();closeModal();render();
+  showToast((type==="retrait"?"Retrait de ":"Apport de ")+fmtX(a)+" enregistré");
+}
+function submitInjection(){return submitMouvement("apport");}
+
+function submitCharge(id){
+  const label=gv("ch-lbl").trim(), amt=gn("ch-amt");
+  if(!label)return showToast("Donne un nom à cette charge","err");
+  if(!amt)return showToast("Indique le montant mensuel","err");
+  const start=gv("ch-start")||thisMonth(), end=gv("ch-end")||"";
+  if(end&&end<start)return showToast("Le dernier mois est avant le premier","err");
+  const data={label,amount:amt,cat:gv("ch-cat")||"autre_c",
+    day:Math.min(28,Math.max(1,parseInt(gv("ch-day"))||1)),start,end};
+  if(id)S.charges=(S.charges||[]).map(c=>c.id===id?{...c,...data}:c);
+  else S.charges=[...(S.charges||[]),{id:uid(),...data,pause:false}];
+  save();closeModal();render();
+  showToast(id?"Charge modifiée":label+" ajoutée — "+fmtX(amt)+" par mois");
+}
+function toggleCharge(id){
+  S.charges=(S.charges||[]).map(c=>c.id===id?{...c,pause:!c.pause}:c);
+  save();renderContent();
+  const c=(S.charges||[]).find(x=>x.id===id);
+  showToast(c&&c.pause?"Charge mise en pause":"Charge réactivée");
+}
+function delCharge(id){
+  const c=(S.charges||[]).find(x=>x.id===id);
+  if(!confirm(`Supprimer « ${c?c.label:"cette charge"} » et tout son historique de prélèvements ?`))return;
+  S.charges=(S.charges||[]).filter(x=>x.id!==id);
+  dbDelete("fixed_charges",id);
+  save();renderContent();showToast("Charge supprimée");
 }
 function submitPayer(){
   const id=S._payId, m=gn("y-amt");
@@ -2669,7 +3075,7 @@ function morningPing(){
   try{new Notification(`${n.length} rendez-vous aujourd'hui`,{body,tag:"gb-day"});}catch{}
 }
 function exportJSON(){
-  dl(new Blob([JSON.stringify({projects:S.projects,perso:S.perso,caps:S.caps,events:S.events,settings:S.settings,meta:S.meta},null,2)],{type:"application/json"}),
+  dl(new Blob([JSON.stringify({projects:S.projects,perso:S.perso,caps:S.caps,charges:S.charges||[],events:S.events,settings:S.settings,meta:S.meta},null,2)],{type:"application/json"}),
     "garagebudget-"+today()+".json");
   showToast("Sauvegarde téléchargée");
 }
@@ -2680,7 +3086,7 @@ function importJSON(ev){
     const d=JSON.parse(e.target.result);
     if(!d.projects)throw 0;
     S.projects=d.projects;
-    S.perso=d.perso||[];S.caps=d.caps||[];S.events=d.events||[];
+    S.perso=d.perso||[];S.caps=d.caps||[];S.charges=d.charges||[];S.events=d.events||[];
     if(d.settings)S.settings={...S.settings,...d.settings};
     if(d.meta)S.meta={...S.meta,...d.meta};
     save();render();showToast("Sauvegarde restaurée");
@@ -2709,6 +3115,9 @@ function palFill(q){
   items.push({icon:"＋",label:"Nouveau véhicule",sub:"Créer",fn:()=>openModal("new")});
   items.push({icon:"📅",label:"Nouveau rendez-vous",sub:"Créer",fn:()=>openModal("event")});
   items.push({icon:"💉",label:"Apport de fonds",sub:"Créer",fn:()=>openModal("injection")});
+  items.push({icon:"📤",label:"Retrait d'argent",sub:"Créer",fn:()=>openModal("retrait")});
+  items.push({icon:"🏭",label:"Charge fixe",sub:"Créer",fn:()=>openModal("charge")});
+  items.push({icon:"📒",label:"Journal de trésorerie",sub:"Aller à",fn:()=>{setView("treso");setTimeout(()=>setTab("mouv"),0);}});
   items.push({icon:"⬇",label:"Télécharger une sauvegarde",sub:"Données",fn:()=>exportJSON()});
   items.push({icon:"📆",label:"Exporter l'agenda (.ics)",sub:"Données",fn:()=>exportICS()});
   S.projects.forEach(p=>items.push({icon:"🚗",label:pName(p),
@@ -2753,6 +3162,12 @@ document.addEventListener("keydown",e=>{
 });
 g("pal-in").addEventListener("input",e=>palFill(e.target.value));
 window.addEventListener("resize",()=>{renderTop();});
+window.addEventListener("offline",()=>renderSyncChip());
+window.addEventListener("online",()=>{
+  cancelRetry();
+  if(AUTH.refresh||authed()){setSync("loading");pushRemote();}
+  else renderSyncChip();
+});
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"){
     streakTick();
@@ -2767,6 +3182,7 @@ function flushOnExit(){
     ["projects",S.projects.map(p=>({id:p.id,data:p,updated_at:new Date().toISOString()}))],
     ["perso_expenses",S.perso.map(e=>({id:e.id,data:e}))],
     ["capital_injections",S.caps.map(c=>({id:c.id,data:c}))],
+    ["fixed_charges",(S.charges||[]).map(c=>({id:c.id,data:c,updated_at:new Date().toISOString()}))],
     ["events",S.events.filter(e=>e.src!=="gcal").map(e=>({id:e.id,data:e,updated_at:new Date().toISOString()}))]];
   body.forEach(([t,rows])=>{
     if(!rows.length)return;
@@ -2785,11 +3201,14 @@ async function boot(){
   authLoad();
   if(hash&&hash.err)return showGate(hash.err==="otp_expired"
     ?"Ce lien a expiré. Demande-en un nouveau." : hash.err,"err");
-  const ok=(hash&&hash.ok)||await authReady();
-  if(!ok)return showGate(AUTH.email?"Ta session a expiré. Redemande un lien.":"");
+  let ok=(hash&&hash.ok)||await authReady();
+  let degraded=false;
+  if(!ok&&AUTH.refresh&&!authDead){ok=true;degraded=true;}   /* serveur injoignable, session intacte */
+  if(!ok)return showGate(AUTH.email?"Ta session a expiré. Reconnecte-toi.":"");
   showApp();
-  if(!AUTH.email||!AUTH.id)fetchUser();
+  if(!degraded&&(!AUTH.email||!AUTH.id))fetchUser();
   await loadAll();
+  if(degraded){setSync("err");scheduleRetry();}
   setTimeout(morningPing,1200);
 }
 boot().catch(()=>showGate("Démarrage impossible. Recharge la page.","err"));
