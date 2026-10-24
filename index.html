@@ -342,7 +342,7 @@ async function authRefresh(){
       }catch{
         return false;                   /* réseau coupé : la session reste valable */
       }
-      if(r.ok){authDead=false;return setSession(await r.json());}
+      if(r.ok){authDead=false;const ok=setSession(await r.json());if(ok)rtJeton();return ok;}
       if(r.status>=500||r.status===429)return false;   /* panne ou quota : on réessaiera */
       authDead=true;authClear();return false;          /* refus explicite : session morte */
     });
@@ -430,6 +430,7 @@ function signOut(){
   const tok=AUTH.token;
   try{fetch(SU+"/auth/v1/logout",{method:"POST",keepalive:true,
     headers:{apikey:SK,Authorization:"Bearer "+tok}});}catch{}
+  rtFerme();
   authClear();
   try{localStorage.removeItem(LS);}catch{}
   location.replace(appURL());
@@ -460,8 +461,14 @@ async function dbGet(t){
 }
 /* Empreinte de ce qui est déjà en base, pour ne réenvoyer que les lignes modifiées. */
 const _sent=Object.create(null);
-function _mark(t,rows){rows.forEach(r=>{_sent[t+"/"+r.id]=JSON.stringify(r.data);});}
-function _clearMarks(){for(const k in _sent)delete _sent[k];}
+/* Lignes qui ont déjà existé côté serveur. Sert à distinguer « créé ici, pas encore
+   envoyé » de « supprimé par quelqu'un d'autre » — sans ça, une suppression faite
+   par l'autre poste revient toute seule au rechargement. */
+let KNOWN=Object.create(null);
+const _kk=(t,id)=>t+"/"+id;
+function _mark(t,rows){rows.forEach(r=>{_sent[_kk(t,r.id)]=JSON.stringify(r.data);KNOWN[_kk(t,r.id)]=1;});}
+function _forget(t,id){delete _sent[_kk(t,id)];delete KNOWN[_kk(t,id)];}
+function _clearMarks(){for(const k in _sent)delete _sent[k];KNOWN=Object.create(null);}
 async function dbUpsert(t,rows,force){
   if(!rows||!rows.length)return true;
   const todo=force?rows:rows.filter(r=>_sent[t+"/"+r.id]!==JSON.stringify(r.data));
@@ -474,7 +481,7 @@ async function dbUpsert(t,rows,force){
   }catch{return false;}
 }
 async function dbDelete(t,id){
-  delete _sent[t+"/"+id];
+  _forget(t,id);
   try{
     const r=await sb("/rest/v1/"+t+"?id=eq."+encodeURIComponent(id),{method:"DELETE"});
     if(!r.ok)setSync("err");
@@ -1058,17 +1065,21 @@ function renderSyncChip(){
     err:offline?["var(--warn)","Hors ligne — reprise auto"]
                :["var(--bad)",retryTimer?"Nouvelle tentative…":"Envoi refusé"],
     loading:["var(--warn)","Enregistrement…"]};
-  const[c,l]=map[syncState]||map.loading;
+  let[c,l]=map[syncState]||map.loading;
+  if(syncState==="ok")l=rtActif()?"Synchronisé · direct":"Synchronisé · au rechargement";
   d.style.background=c;
   t.textContent=GC.busy?"Google…":(gcalConnected()?l+" · Google":l);
   t.style.color="var(--tx3)";
 }
-function save(){
-  S._dirty=true;
+function writeCache(){
   try{
     localStorage.setItem(LS,JSON.stringify({projects:S.projects,perso:S.perso,caps:S.caps,events:S.events,
-      charges:S.charges||[],settings:S.settings,meta:S.meta,trash:S._gcalTrash||[]}));
+      charges:S.charges||[],settings:S.settings,meta:S.meta,trash:S._gcalTrash||[],known:KNOWN}));
   }catch{}
+}
+function save(){
+  S._dirty=true;
+  writeCache();
   if(syncTimer)clearTimeout(syncTimer);
   setSync("loading");
   syncTimer=setTimeout(()=>{syncTimer=null;pushRemote();},1400);
@@ -1123,6 +1134,7 @@ function loadLocal(){
     if(!raw)return false;
     const d=JSON.parse(raw);
     S.projects=d.projects||[];S.perso=d.perso||[];S.caps=d.caps||[];S.events=d.events||[];S.charges=d.charges||[];
+    if(d.known&&typeof d.known==="object")KNOWN=Object.assign(Object.create(null),d.known);
     if(d.settings)S.settings={...DEF_SET,...d.settings};
     if(d.meta)S.meta={...S.meta,...d.meta};
     S._gcalTrash=d.trash||[];
@@ -1134,9 +1146,15 @@ function loadLocal(){
 /* Fusionne une liste distante avec la liste locale, sans rien perdre :
    ce qui existe des deux côtés vient du serveur, ce qui n'existe qu'ici est conservé
    puis renvoyé au prochain enregistrement. */
-function mergeById(remote,local){
+function mergeById(table,remote,local){
   const out=remote.slice(), seen=new Set(remote.map(x=>x&&x.id));
-  local.forEach(x=>{if(x&&!seen.has(x.id))out.push(x);});
+  let supprimes=0;
+  local.forEach(x=>{
+    if(!x||seen.has(x.id))return;
+    if(KNOWN[_kk(table,x.id)]){supprimes++;_forget(table,x.id);return;}  /* supprimé par l'autre poste */
+    out.push(x);                                                        /* créé ici, pas encore envoyé */
+  });
+  if(supprimes)console.info("[GB] "+supprimes+" élément(s) supprimé(s) ailleurs, retirés de "+table);
   return out;
 }
 let lastPull=0;
@@ -1146,11 +1164,11 @@ async function pullRemote(){
       dbGet("settings"),dbGet("capital_injections"),dbGet("events"),dbGet("fixed_charges")]);
     if(pr===null)return false;                      /* serveur injoignable ou table absente */
     const R=rows=>(rows||[]).map(r=>r.data||r);
-    S.projects=mergeById(R(pr),S.projects);
-    if(pe!==null)S.perso=mergeById(R(pe),S.perso);
-    if(ca!==null)S.caps=mergeById(R(ca),S.caps);
-    if(ev!==null)S.events=mergeById(R(ev),S.events);
-    if(ch!==null)S.charges=mergeById(R(ch),S.charges||[]);
+    S.projects=mergeById("projects",R(pr),S.projects);
+    if(pe!==null)S.perso=mergeById("perso_expenses",R(pe),S.perso);
+    if(ca!==null)S.caps=mergeById("capital_injections",R(ca),S.caps);
+    if(ev!==null)S.events=mergeById("events",R(ev),S.events.filter(e=>e.src!=="gcal")).concat(S.events.filter(e=>e.src==="gcal"));
+    if(ch!==null)S.charges=mergeById("fixed_charges",R(ch),S.charges||[]);
     if(se&&se.length&&se[0].data)S.settings={...S.settings,...se[0].data};
     S.projects.forEach(p=>{p.expenses=p.expenses||[];p.timeEntries=p.timeEntries||[];});
     /* Ce qui vient du serveur est déjà à jour : inutile de le renvoyer. */
@@ -1163,6 +1181,130 @@ async function pullRemote(){
     return true;
   }catch{return false;}
 }
+/* ══════════════════════════════════════════════════════════════
+   8 bis. TEMPS RÉEL — ce que l'autre poste change arrive ici tout de suite
+   ══════════════════════════════════════════════════════════════ */
+const RT={ws:null,ref:0,hb:null,joined:false,essai:0,timer:null,dernierToast:0};
+const RT_TOPIC="realtime:garagebudget";
+const RT_MAP={
+  projects:{get:()=>S.projects,set:v=>{S.projects=v;}},
+  perso_expenses:{get:()=>S.perso,set:v=>{S.perso=v;}},
+  capital_injections:{get:()=>S.caps,set:v=>{S.caps=v;}},
+  events:{get:()=>S.events,set:v=>{S.events=v;}},
+  fixed_charges:{get:()=>S.charges||[],set:v=>{S.charges=v;}}
+};
+const rtActif=()=>!!(RT.ws&&RT.ws.readyState===1&&RT.joined);
+
+function rtEnvoi(topic,event,payload){
+  if(!RT.ws||RT.ws.readyState!==1)return;
+  try{RT.ws.send(JSON.stringify({topic,event,payload:payload||{},ref:String(++RT.ref)}));}catch{}
+}
+function rtFerme(){
+  if(RT.hb){clearInterval(RT.hb);RT.hb=null;}
+  if(RT.timer){clearTimeout(RT.timer);RT.timer=null;}
+  RT.joined=false;
+  if(RT.ws){try{RT.ws.onclose=null;RT.ws.close();}catch{}RT.ws=null;}
+  renderSyncChip();
+}
+function rtReconnecte(){
+  if(RT.timer||!(authed()||AUTH.refresh))return;
+  const attente=Math.min(30000,1000*Math.pow(2,RT.essai++));
+  RT.timer=setTimeout(()=>{RT.timer=null;rtConnecte();},attente);
+}
+function rtConnecte(){
+  if(!(authed()||AUTH.refresh))return;
+  if(!("WebSocket"in window))return;
+  if(RT.ws&&(RT.ws.readyState===0||RT.ws.readyState===1))return;
+  let ws;
+  try{ws=new WebSocket(SU.replace(/^http/,"ws")+"/realtime/v1/websocket?apikey="+encodeURIComponent(SK)+"&vsn=1.0.0");}
+  catch{return rtReconnecte();}
+  RT.ws=ws;RT.joined=false;
+  ws.onopen=()=>{
+    RT.essai=0;
+    rtEnvoi(RT_TOPIC,"phx_join",{
+      config:{
+        postgres_changes:Object.keys(RT_MAP).concat("settings").map(t=>({event:"*",schema:"public",table:t})),
+        broadcast:{self:false},presence:{key:""},private:false
+      },
+      access_token:AUTH.token||null
+    });
+    RT.hb=setInterval(()=>rtEnvoi("phoenix","heartbeat",{}),25000);
+  };
+  ws.onmessage=ev=>{
+    let m;try{m=JSON.parse(ev.data);}catch{return;}
+    if(m.event==="phx_reply"&&m.topic===RT_TOPIC){
+      RT.joined=((m.payload||{}).status==="ok");
+      renderSyncChip();
+      return;
+    }
+    if(m.event==="postgres_changes"&&m.payload&&m.payload.data)rtApplique(m.payload.data);
+    else if(m.event==="phx_error"||m.event==="phx_close"){RT.joined=false;renderSyncChip();}
+  };
+  ws.onerror=()=>{};
+  ws.onclose=()=>{
+    RT.joined=false;
+    if(RT.hb){clearInterval(RT.hb);RT.hb=null;}
+    RT.ws=null;renderSyncChip();rtReconnecte();
+  };
+}
+/* Le jeton change toutes les heures : on le repasse au canal sans se reconnecter. */
+function rtJeton(){if(rtActif())rtEnvoi(RT_TOPIC,"access_token",{access_token:AUTH.token});}
+
+let rtRenduTimer=null, rtRecus=0;
+function rtRendu(){
+  if(rtRenduTimer)return;
+  rtRenduTimer=setTimeout(()=>{
+    rtRenduTimer=null;
+    writeCache();
+    render();
+    if(rtRecus&&Date.now()-RT.dernierToast>2500){
+      RT.dernierToast=Date.now();
+      showToast(rtRecus===1?"Mise à jour reçue":rtRecus+" mises à jour reçues");
+    }
+    rtRecus=0;
+  },350);
+}
+function rtApplique(d){
+  const t=d.table, type=d.type;
+  if(t==="settings"){
+    if(type==="DELETE")return;
+    const data=d.record&&d.record.data;
+    if(!data)return;
+    const j=JSON.stringify(data);
+    if(_sent[_kk("settings","main")]===j)return;        /* notre propre écho */
+    _sent[_kk("settings","main")]=j;KNOWN[_kk("settings","main")]=1;
+    S.settings={...S.settings,...data};
+    rtRecus++;rtRendu();return;
+  }
+  const M=RT_MAP[t];if(!M)return;
+  if(type==="DELETE"){
+    const id=(d.old_record||{}).id;if(!id)return;
+    const liste=M.get(), reste=liste.filter(x=>x&&x.id!==id);
+    _forget(t,id);
+    if(reste.length!==liste.length){
+      M.set(reste);
+      if(t==="projects"&&S.selected===id){S.selected=null;S.view="stock";closeModal();}
+      rtRecus++;rtRendu();
+    }
+    return;
+  }
+  const row=d.record;if(!row||!row.id)return;
+  const data=row.data||row;
+  if(!data||typeof data!=="object")return;
+  const j=JSON.stringify(data);
+  if(_sent[_kk(t,row.id)]===j)return;                   /* notre propre écho */
+  _sent[_kk(t,row.id)]=j;KNOWN[_kk(t,row.id)]=1;
+  if(t==="projects"){data.expenses=data.expenses||[];data.timeEntries=data.timeEntries||[];}
+  const liste=M.get().slice();
+  const i=liste.findIndex(x=>x&&x.id===row.id);
+  if(i>=0)liste[i]=data; else liste.unshift(data);
+  M.set(liste);
+  rtRecus++;
+  if(t==="projects"&&S.selected===row.id&&g("modal-root")&&g("modal-root").innerHTML)
+    showToast("Ce véhicule vient d'être modifié sur un autre poste","err");
+  rtRendu();
+}
+
 async function loadAll(){
   setSync("loading");
   loadLocal();
@@ -1174,6 +1316,7 @@ async function loadAll(){
   if(!ok)scheduleRetry();
   streakTick();
   render();
+  rtConnecte();
   /* Des données locales que le serveur ne connaît pas encore ? On les lui envoie. */
   if(ok&&JSON.stringify([S.projects,S.perso,S.caps,S.charges||[],S.events.filter(e=>e.src!=="gcal")])!==before)save();
   if(S.settings.gcalAuto&&gcalReady()){restoreToken();gcalConnect(true).then(g=>{if(g)gcalSync(true);});}
@@ -3164,14 +3307,15 @@ g("pal-in").addEventListener("input",e=>palFill(e.target.value));
 window.addEventListener("resize",()=>{renderTop();});
 window.addEventListener("offline",()=>renderSyncChip());
 window.addEventListener("online",()=>{
-  cancelRetry();
+  cancelRetry();rtConnecte();
   if(AUTH.refresh||authed()){setSync("loading");pushRemote();}
   else renderSyncChip();
 });
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"){
     streakTick();
-    if(!S._dirty&&!syncTimer)pullRemote().then(ok=>{if(ok)render();});
+    rtConnecte();
+    if(!rtActif()&&!S._dirty&&!syncTimer)pullRemote().then(ok=>{if(ok)render();});
     if(S.settings.gcalAuto&&gcalConnected())gcalSync(true);
   }
 });
