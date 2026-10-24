@@ -252,6 +252,7 @@ tbody tr.clk:hover{background:var(--raise)}
 </div>
 <script>
 "use strict";
+  ;(function(){var a=loadLocal;loadLocal=function(){var r=a.apply(this,arguments);["projects","perso","caps","events","charges"].forEach(function(p){if(Array.isArray(S[p]))S[p]=S[p].filter(function(x){return !!x&&typeof x==="object"&&!Array.isArray(x)&&!!x.id&&!idTechnique(x.id)})});return r}})();
 /* ══════════════════════════════════════════════════════════════
    1. STOCKAGE  (Supabase + localStorage)
    ══════════════════════════════════════════════════════════════ */
