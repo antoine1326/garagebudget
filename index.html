@@ -451,12 +451,21 @@ function captureHash(){
   return setSession({access_token:q.get("access_token"),refresh_token:q.get("refresh_token"),
     expires_in:+(q.get("expires_in")||3600)})?{ok:true}:null;
 }
+/* Les identifiants commençant par deux tirets bas sont des lignes de service
+   (tests de connexion, diagnostics). Elles ne doivent jamais remonter dans l'app. */
+const idTechnique=id=>/^__/.test(String(id==null?"":id));
+/* Une ligne n'est exploitable que si elle contient bien un objet avec son propre id. */
+const ligneValide=(id,data)=>!idTechnique(id)&&!!data&&typeof data==="object"&&!Array.isArray(data)&&!!data.id;
+/* Le contenu d'une ligne est toujours dans sa colonne « data ». Si elle est vide,
+   la ligne n'est pas exploitable — on ne se rabat jamais sur la ligne brute. */
+const contenuDe=row=>(row&&row.data&&typeof row.data==="object"&&!Array.isArray(row.data))?row.data:null;
 async function dbGet(t){
   try{
     const r=await sb("/rest/v1/"+t+"?select=*&limit=2000");
     if(!r.ok)return null;
     const rows=await r.json();
-    return Array.isArray(rows)?rows.filter(x=>x&&x.id!=="__gb_probe__"):null;
+    if(!Array.isArray(rows))return null;
+    return rows.filter(x=>x&&(t==="settings"?(!idTechnique(x.id)&&!!contenuDe(x)):ligneValide(x.id,contenuDe(x))));
   }catch{return null;}
 }
 /* Empreinte de ce qui est déjà en base, pour ne réenvoyer que les lignes modifiées. */
@@ -611,6 +620,8 @@ const CHCAT=[
  {id:"vehicule",label:"Véhicule de service",icon:"🚐"},{id:"outillage",label:"Outillage / consommables",icon:"🧰"},
  {id:"logiciel",label:"Abonnements / annonces",icon:"💻"},{id:"compta",label:"Comptable",icon:"📊"},
  {id:"banque",label:"Frais bancaires / prêt",icon:"🏦"},{id:"autre_c",label:"Autre",icon:"📦"}];
+const STATUS_DEFAUT={label:"Sans statut",color:"var(--tx3)",bg:"rgba(100,109,130,.12)",short:"—"};
+const statutDe=p=>STATUS[p&&p.status]||STATUS_DEFAUT;
 const STATUS={
   previsionnel:{label:"Prévisionnel",color:"var(--proj)",bg:"var(--proj-s)",short:"Prév."},
   acquisition:{label:"Acheté",color:"#60A5FA",bg:"rgba(96,165,250,.12)",short:"Acheté"},
@@ -800,7 +811,7 @@ function calcTreso(){
     cashImmo,cashImmoNoPause,cashImmoPause,aRentrer,active,activeNoPause,paused,prev,sold};
 }
 const proj=id=>S.projects.find(p=>p.id===id);
-const pName=p=>p?`${p.brand} ${p.model}`.trim():"";
+const pName=p=>{if(!p)return"";const n=[p.brand,p.model].filter(x=>x!=null&&String(x).trim()!=="").join(" ").trim();return n||"Véhicule sans nom";};
 
 /* ══════════════════════════════════════════════════════════════
    6. AGENDA — modèle, alertes automatiques, ICS
@@ -1163,7 +1174,7 @@ async function pullRemote(){
     const[pr,pe,se,ca,ev,ch]=await Promise.all([dbGet("projects"),dbGet("perso_expenses"),
       dbGet("settings"),dbGet("capital_injections"),dbGet("events"),dbGet("fixed_charges")]);
     if(pr===null)return false;                      /* serveur injoignable ou table absente */
-    const R=rows=>(rows||[]).map(r=>r.data||r);
+    const R=rows=>(rows||[]).map(contenuDe).filter(Boolean);
     S.projects=mergeById("projects",R(pr),S.projects);
     if(pe!==null)S.perso=mergeById("perso_expenses",R(pe),S.perso);
     if(ca!==null)S.caps=mergeById("capital_injections",R(ca),S.caps);
@@ -1268,8 +1279,8 @@ function rtApplique(d){
   const t=d.table, type=d.type;
   if(t==="settings"){
     if(type==="DELETE")return;
-    const data=d.record&&d.record.data;
-    if(!data)return;
+    const data=contenuDe(d.record);
+    if(!data||idTechnique(d.record.id))return;
     const j=JSON.stringify(data);
     if(_sent[_kk("settings","main")]===j)return;        /* notre propre écho */
     _sent[_kk("settings","main")]=j;KNOWN[_kk("settings","main")]=1;
@@ -1289,8 +1300,8 @@ function rtApplique(d){
     return;
   }
   const row=d.record;if(!row||!row.id)return;
-  const data=row.data||row;
-  if(!data||typeof data!=="object")return;
+  const data=contenuDe(row);
+  if(!ligneValide(row.id,data))return;   /* ligne de service ou corrompue : on l'ignore */
   const j=JSON.stringify(data);
   if(_sent[_kk(t,row.id)]===j)return;                   /* notre propre écho */
   _sent[_kk(t,row.id)]=j;KNOWN[_kk(t,row.id)]=1;
@@ -1412,7 +1423,7 @@ function renderSide(){
     if(!list.length)return;
     h+=`<div class="sect">${lbl} · ${list.length}</div>`;
     h+=list.map(p=>{
-      const st=STATUS[p.status],d=dSince(p.entryDate),sc=priorityScore(p);
+      const st=statutDe(p),d=dSince(p.entryDate),sc=priorityScore(p);
       return`<div class="item${S.selected===p.id?" on":""}" onclick="selectProject('${p.id}')" style="${dim?"opacity:.5":""}">
         <span class="dot" style="background:${st?.color}"></span>
         <div style="flex:1;min-width:0">
@@ -1440,7 +1451,7 @@ function renderTop(){
   }
   h+=`</div></div><div class="flex" style="gap:6px">`;
   if(p){
-    h+=`<button class="btn btn-sm" onclick="openModal('status')">${STATUS[p.status]?.label}</button>
+    h+=`<button class="btn btn-sm" onclick="openModal('status')">${statutDe(p).label}</button>
         <button class="btn btn-sm" onclick="openModal('edit')">Modifier</button>`;
   }else{
     h+=`<button class="btn-ico" onclick="openPal()" title="Recherche (Ctrl+K)">⌕</button>`;
@@ -1857,7 +1868,7 @@ function vStock(){
   return h;
 }
 function cardStock(p,dim){
-  const s=pStat(p), st=STATUS[p.status], d=dSince(p.entryDate), sc=priorityScore(p), pr=priorityLabel(sc);
+  const s=pStat(p), st=statutDe(p), d=dSince(p.entryDate), sc=priorityScore(p), pr=priorityLabel(sc);
   const isD=p.projectType==="depot_vente";
   const reco=!isD&&p.buyPrice>0?Math.round(s.investedTotal*(1+targetOf(p)/100)/100)*100:0;
   const nextEv=evOfProject(p.id).find(e=>!e.done&&e.date>=today());
@@ -2216,7 +2227,7 @@ function tresoVue(){
     ${["Véhicule","Statut","Sorti","Reste à payer","Vente visée","Marge","Par jour",""].map(c=>`<th>${c}</th>`).join("")}
     </tr></thead><tbody>`;
   t.active.forEach(p=>{
-    const s=pStat(p), st=STATUS[p.status], d=dSince(p.entryDate)||1, pause=p.status==="pause";
+    const s=pStat(p), st=statutDe(p), d=dSince(p.entryDate)||1, pause=p.status==="pause";
     h+=`<tr class="clk" data-p="${p.id}" style="${pause?"opacity:.5":""}">
       <td><div style="font-weight:600">${esc(pName(p))}</div><div style="font-size:11px;color:var(--tx3)">${p.year||""} · ${d} j</div></td>
       <td>${chip(st.short,st.color,st.bg)}</td>
@@ -3264,7 +3275,7 @@ function palFill(q){
   items.push({icon:"⬇",label:"Télécharger une sauvegarde",sub:"Données",fn:()=>exportJSON()});
   items.push({icon:"📆",label:"Exporter l'agenda (.ics)",sub:"Données",fn:()=>exportICS()});
   S.projects.forEach(p=>items.push({icon:"🚗",label:pName(p),
-    sub:`${STATUS[p.status]?.label}${p.plate?" · "+p.plate:""}${p.year?" · "+p.year:""}`,fn:()=>selectProject(p.id)}));
+    sub:`${statutDe(p).label}${p.plate?" · "+p.plate:""}${p.year?" · "+p.year:""}`,fn:()=>selectProject(p.id)}));
   S.events.filter(e=>e.date>=addDays(today(),-30)).forEach(e=>items.push({icon:EVT[e.type]?.icon||"📌",
     label:e.title,sub:"Rendez-vous · "+relDay(e.date),fn:()=>{S.anchor=e.date;S.agendaMode="jour";setView("agenda");}}));
   palItems=q?items.filter(i=>(i.label+" "+i.sub).toLowerCase().includes(q)).slice(0,24):items.slice(0,14);
